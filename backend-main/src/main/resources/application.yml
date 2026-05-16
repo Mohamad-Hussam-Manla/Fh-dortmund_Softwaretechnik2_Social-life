@@ -1,0 +1,23 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: backend-main
+  datasource:
+    url: jdbc:postgresql://localhost:5432/mystudyapp
+    username: admin
+    password: password
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      "[hibernate.format_sql]": true
+
+# Custom MQTT properties
+mqtt:
+  broker-url: tcp://localhost:1883
+  client-id: backend-main-subscriber
+  default-topic: mystudyapp/events

@@ -1,0 +1,12 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: backend-asta
+
+# Custom MQTT properties
+mqtt:
+  broker-url: tcp://localhost:1883
+  client-id: backend-asta-publisher
+  default-topic: mystudyapp/events
