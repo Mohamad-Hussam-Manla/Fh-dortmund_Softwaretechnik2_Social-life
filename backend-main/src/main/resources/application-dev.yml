@@ -1,0 +1,21 @@
+# Development Profile Overrides
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      "[hibernate.format_sql]": true
+
+# Logging
+logging:
+  level:
+    # Fixed package name to match your actual code
+    de.fhdortmund.mystudyapp: DEBUG
+    
+    # Optional: see SQL through the logger (nicer formatting than show-sql)
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    
+    # Only enable if you are debugging security filters; otherwise it's noisy
+    # org.springframework.security: DEBUG

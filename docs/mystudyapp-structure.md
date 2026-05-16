@@ -24,7 +24,7 @@ mystudyapp/
 │   └── design-patterns.md                         # Factory · Adapter · Observer — motivation + UML
 │
 │
-├── backend-main/                                  # System 1 — Spring Boot Modulith (port 8080)
+├── backend-main/                                  # System 1 — Spring Boot Modulith (port 8081)
 │   ├── pom.xml                                    # Spring Boot · Modulith · Security · MQTT · Flyway · MapStruct · JWT
 │   └── src/
 │       ├── main/
@@ -218,7 +218,7 @@ mystudyapp/
     ├── package.json                               # react · react-dom · react-router-dom
     │                                              # @tanstack/react-query · zustand
     │                                              # react-hook-form · zod · axios
-    ├── vite.config.js                             # proxy /api → :8080 · PWA plugin · code-split
+    ├── vite.config.js                             # proxy /api → :8081 · PWA plugin · code-split
     ├── index.html
     ├── .env.example                               # VITE_API_URL · VITE_MQTT_URL
     │

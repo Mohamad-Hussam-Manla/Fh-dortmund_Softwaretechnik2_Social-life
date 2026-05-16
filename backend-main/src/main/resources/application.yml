@@ -1,20 +1,22 @@
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8081}
 
 spring:
   application:
     name: backend-main
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
-    url: jdbc:postgresql://localhost:5432/${POSTGRES_DB:mystudyapp}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5435}/${POSTGRES_DB:mystudyapp}
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    password: ${POSTGRES_PASSWORD:changeme-strong-password-here}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: true
+    show-sql: false
     properties:
-      "[hibernate.format_sql]": true
+      "[hibernate.format_sql]": false
 
 # JWT
 jwt:
@@ -26,6 +28,6 @@ jwt:
 
 # MQTT
 mqtt:
-  broker-url: tcp://localhost:1883
+  broker-url: tcp://${MQTT_HOST:localhost}:1883
   client-id: backend-main-subscriber
   default-topic: mystudyapp/events

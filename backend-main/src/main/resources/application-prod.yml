@@ -1,0 +1,14 @@
+# Production Profile Overrides
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      "[hibernate.format_sql]": false
+
+# Logging
+logging:
+  level:
+    root: WARN
+    com.mystudyapp: INFO
