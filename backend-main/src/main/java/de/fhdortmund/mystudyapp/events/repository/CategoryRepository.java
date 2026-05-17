@@ -7,4 +7,6 @@ import de.fhdortmund.mystudyapp.events.model.Category;
 
 @Repository
 public interface CategoryRepository extends JpaRepository<Category, Integer> {
+    boolean existsByName(String name);
+
 }

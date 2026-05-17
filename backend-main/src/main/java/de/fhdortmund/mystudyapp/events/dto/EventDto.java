@@ -1,14 +1,15 @@
 package de.fhdortmund.mystudyapp.events.dto;
 
-import de.fhdortmund.mystudyapp.events.model.EventStatus;
-import de.fhdortmund.mystudyapp.identity.dto.UserDto;
-import lombok.Builder;
-import lombok.Data;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+
+import de.fhdortmund.mystudyapp.events.model.EventStatus;
+import de.fhdortmund.mystudyapp.identity.dto.UserDto;
+import de.fhdortmund.mystudyapp.registration.model.RsvpStatus;
+import lombok.Builder;
+import lombok.Data;
 
 @Data
 @Builder
@@ -27,4 +28,6 @@ public class EventDto {
     private List<EventMediaDto> media;
     private Instant createdAt;
     private boolean isHost;
+    /** Current user's RSVP status for this event (null if not registered) */
+    private RsvpStatus myRsvpStatus;
 }

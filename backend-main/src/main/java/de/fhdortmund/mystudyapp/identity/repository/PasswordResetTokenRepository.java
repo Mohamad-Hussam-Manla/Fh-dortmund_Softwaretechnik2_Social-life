@@ -1,5 +1,6 @@
 package de.fhdortmund.mystudyapp.identity.repository;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,9 +15,11 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
 
     Optional<PasswordResetToken> findByToken(String token);
 
-    // Delete all previous reset tokens for this user when they request a new one.
-    // Keeps the table clean and invalidates old links automatically.
     @Modifying
     @Query("DELETE FROM PasswordResetToken t WHERE t.user.id = :userId")
     void deleteAllByUserId(@Param("userId") UUID userId);
+
+    @Modifying
+    @Query("DELETE FROM PasswordResetToken t WHERE t.expiryDate < :now")
+    int deleteAllExpiredBefore(@Param("now") Instant now);
 }

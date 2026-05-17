@@ -1,5 +1,6 @@
 package de.fhdortmund.mystudyapp.events.service;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -31,6 +32,9 @@ import de.fhdortmund.mystudyapp.events.repository.CategoryRepository;
 import de.fhdortmund.mystudyapp.events.repository.EventRepository;
 import de.fhdortmund.mystudyapp.identity.model.User;
 import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
+import de.fhdortmund.mystudyapp.moderation.repository.ReportRepository;
+import de.fhdortmund.mystudyapp.moderation.repository.ReviewRepository;
+import de.fhdortmund.mystudyapp.registration.repository.RsvpRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -46,17 +50,25 @@ public class EventService {
     private final EventMapper eventMapper;
     private final FileStorageService fileStorageService;
     private final StorageProperties storageProperties;
+    private final RsvpRepository rsvpRepository;
+    private final ReviewRepository reviewRepository;
+    private final ReportRepository reportRepository;
 
     /* ==================== CRUD ==================== */
 
     @Transactional
     public EventDto createEvent(CreateEventRequest request, String hostEmail) {
+        if (request.getEndTime().isBefore(request.getStartTime())) {
+            throw new IllegalArgumentException("End time must be after start time");
+        }
+        if (request.getStartTime().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Cannot create events in the past");
+        }
+
         User host = userRepository.findByUniversityEmail(hostEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
         Event event = eventFactory.createEvent(request, host);
-        // Use a final reference so the lambda below can capture it without
-        // "variable must be effectively final" errors.
         final Event savedEvent = eventRepository.save(event);
 
         if (request.getCategoryIds() != null && !request.getCategoryIds().isEmpty()) {
@@ -72,8 +84,6 @@ public class EventService {
                     })
                     .collect(Collectors.toSet());
             savedEvent.setEventCategories(categories);
-            // No need to re-capture the return value; JPA updates the same
-            // managed entity in-place.
             eventRepository.save(savedEvent);
         }
 
@@ -91,10 +101,21 @@ public class EventService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<EventDto> getPublishedEvents(Pageable pageable, String currentUserEmail) {
+    public PageResponse<EventDto> getPublishedEvents(
+            Integer categoryId,
+            Instant dateFrom,
+            Instant dateTo,
+            String location,
+            String q,
+            Pageable pageable,
+            String currentUserEmail) {
+
         User currentUser = userRepository.findByUniversityEmail(currentUserEmail).orElse(null);
         UUID currentUserId = currentUser != null ? currentUser.getId() : null;
-        Page<Event> page = eventRepository.findByStatus(EventStatus.PUBLISHED, pageable);
+
+        Page<Event> page = eventRepository.findPublishedWithFilters(
+                EventStatus.PUBLISHED, categoryId, dateFrom, dateTo, location, q, pageable);
+
         return buildPageResponse(page, currentUserId);
     }
 
@@ -108,6 +129,13 @@ public class EventService {
 
     @Transactional
     public EventDto updateEvent(UUID eventId, CreateEventRequest request, String userEmail) {
+        if (request.getEndTime().isBefore(request.getStartTime())) {
+            throw new IllegalArgumentException("End time must be after start time");
+        }
+        if (request.getStartTime().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Cannot move events into the past");
+        }
+
         User user = userRepository.findByUniversityEmail(userEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
@@ -120,6 +148,11 @@ public class EventService {
 
         if (event.getStatus() == EventStatus.CANCELLED) {
             throw new ForbiddenActionException("update", "Cannot update a cancelled event");
+        }
+
+        if (request.getMaxCapacity() < event.getCurrentRsvpCount()) {
+            throw new ForbiddenActionException("update",
+                    "Cannot reduce capacity below current RSVP count (" + event.getCurrentRsvpCount() + ")");
         }
 
         event.setTitle(request.getTitle().trim());
@@ -181,6 +214,17 @@ public class EventService {
         if (!isHost && !isAdmin) {
             throw new ForbiddenActionException("delete", "Only the host or an admin can delete this event");
         }
+
+        if (event.getEventMedia() != null) {
+            for (EventMedia media : event.getEventMedia()) {
+                fileStorageService.deleteEventMedia(media.getUrl());
+            }
+            event.getEventMedia().clear();
+        }
+
+        rsvpRepository.deleteAllByEventId(eventId);
+        reviewRepository.deleteAllByEventId(eventId);
+        reportRepository.deleteAllByEventId(eventId);
 
         eventRepository.delete(event);
         log.info("Event deleted: {} by {}", eventId, userEmail);
@@ -273,6 +317,15 @@ public class EventService {
         return eventMapper.toDto(saved, user.getId());
     }
 
+    /* ==================== Official Events ==================== */
+
+    @Transactional
+    public EventDto saveOfficialEvent(Event event) {
+        Event saved = eventRepository.save(event);
+        log.info("Official event saved via MQTT: {} (Status: {})", saved.getId(), saved.getStatus());
+        return eventMapper.toDto(saved, null);
+    }
+
     /* ==================== Helpers ==================== */
 
     private PageResponse<EventDto> buildPageResponse(Page<Event> page, UUID currentUserId) {
@@ -287,13 +340,4 @@ public class EventService {
                 .last(page.isLast())
                 .build();
     }
-
-        @Transactional
-    public EventDto saveOfficialEvent(Event event) {
-        // Event is already built by OfficialEventAdapter + EventFactory
-        Event saved = eventRepository.save(event);
-        log.info("Official event saved via MQTT: {} (Status: {})", saved.getId(), saved.getStatus());
-        return eventMapper.toDto(saved, null);
-    }
-
 }

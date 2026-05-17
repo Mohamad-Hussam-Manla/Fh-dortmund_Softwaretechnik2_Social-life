@@ -7,9 +7,9 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.fhdortmund.mystudyapp.events.factory.EventFactory;
 import de.fhdortmund.mystudyapp.events.model.Event;
 import de.fhdortmund.mystudyapp.events.service.EventService;
-import de.fhdortmund.mystudyapp.mqtt.dto.OfficialEventAdapter;
 import de.fhdortmund.mystudyapp.mqtt.dto.OfficialEventMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class OfficialEventListener {
 
-    private final OfficialEventAdapter eventAdapter;
+    private final EventFactory eventFactory;
     private final EventService eventService;
     private final ObjectMapper objectMapper;
 
@@ -31,8 +31,8 @@ public class OfficialEventListener {
         try {
             OfficialEventMessage message = objectMapper.readValue(payload, OfficialEventMessage.class);
             
-            // Adapter Pattern: Convert external AStA format to internal Event
-            Event event = eventAdapter.adapt(message);
+            // Factory Pattern: Convert external AStA format to internal Event
+            Event event = eventFactory.createOfficialEvent(message);
             
             // Save the official event (auto-published since it's from AStA/trusted source)
             eventService.saveOfficialEvent(event);

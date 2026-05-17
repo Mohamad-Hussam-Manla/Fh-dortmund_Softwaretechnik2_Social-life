@@ -1,5 +1,5 @@
 server:
-  port: 8081
+  port: ${ASTA_SERVER_PORT:8082}
 
 spring:
   application:
@@ -9,4 +9,5 @@ spring:
 mqtt:
   broker-url: tcp://${MQTT_HOST:localhost}:1883
   client-id: backend-asta-publisher
-  default-topic: mystudyapp/events
+  topic:
+    events: mystudyapp/events

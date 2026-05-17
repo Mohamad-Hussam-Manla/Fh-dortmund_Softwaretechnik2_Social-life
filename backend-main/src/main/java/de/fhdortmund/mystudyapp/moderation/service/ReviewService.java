@@ -1,5 +1,14 @@
 package de.fhdortmund.mystudyapp.moderation.service;
 
+import java.time.Instant;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import de.fhdortmund.mystudyapp.common.exception.ForbiddenActionException;
 import de.fhdortmund.mystudyapp.common.exception.ResourceNotFoundException;
 import de.fhdortmund.mystudyapp.common.response.PageResponse;
@@ -18,14 +27,6 @@ import de.fhdortmund.mystudyapp.registration.model.RsvpStatus;
 import de.fhdortmund.mystudyapp.registration.repository.RsvpRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.Instant;
-import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -74,7 +75,6 @@ public class ReviewService {
         Review saved = reviewRepository.save(review);
         log.info("Review created: {} for event {} by {}", saved.getId(), event.getId(), reviewerEmail);
 
-        // Attempt auto-promotion of the host
         try {
             trustLevelService.promoteToTrustedHost(event.getHost().getId());
             log.info("Host {} auto-promoted to TRUSTED_HOST after review", event.getHost().getId());
@@ -107,6 +107,14 @@ public class ReviewService {
             throw new ResourceNotFoundException("User", "id", hostId);
         }
         Page<Review> page = reviewRepository.findReviewsForHostEvents(hostId, pageable);
+        return buildPageResponse(page);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<ReviewDto> getReviewsByReviewerEmail(String reviewerEmail, Pageable pageable) {
+        User reviewer = userRepository.findByUniversityEmail(reviewerEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        Page<Review> page = reviewRepository.findByReviewerId(reviewer.getId(), pageable);
         return buildPageResponse(page);
     }
 

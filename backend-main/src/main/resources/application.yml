@@ -30,10 +30,13 @@ jwt:
     expiration-ms: 604800000
 
 # MQTT
+# MQTT
 mqtt:
   broker-url: tcp://${MQTT_HOST:localhost}:1883
   client-id: backend-main-subscriber
-  default-topic: mystudyapp/events
+  topic:
+    events: mystudyapp/events
+    alerts: mystudyapp/alerts
 
 # Application Storage Configuration
 app:

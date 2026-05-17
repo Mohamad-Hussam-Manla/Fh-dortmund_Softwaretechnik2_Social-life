@@ -18,10 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import de.fhdortmund.mystudyapp.common.response.ApiResponse;
 import de.fhdortmund.mystudyapp.identity.dto.AuthResponse;
+import de.fhdortmund.mystudyapp.identity.dto.ChangePasswordRequest;
 import de.fhdortmund.mystudyapp.identity.dto.ForgotPasswordRequest;
 import de.fhdortmund.mystudyapp.identity.dto.LoginRequest;
 import de.fhdortmund.mystudyapp.identity.dto.RegisterRequest;
 import de.fhdortmund.mystudyapp.identity.dto.ResetPasswordRequest;
+import de.fhdortmund.mystudyapp.identity.dto.TrustQualificationStatus;
 import de.fhdortmund.mystudyapp.identity.dto.UpdateProfileRequest;
 import de.fhdortmund.mystudyapp.identity.dto.UserDto;
 import de.fhdortmund.mystudyapp.identity.service.UserService;
@@ -69,11 +71,18 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(null, "Account verified. You can now log in."));
     }
 
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<Void>> resendVerification(
+            @Valid @RequestBody ForgotPasswordRequest request) {
+        userService.resendVerificationEmail(request.getUniversityEmail());
+        return ResponseEntity.ok(ApiResponse.success(null,
+                "If that email is registered and not verified, a new verification link has been sent."));
+    }
+
     @PostMapping("/forgot-password")
     public ResponseEntity<ApiResponse<Void>> forgotPassword(
             @Valid @RequestBody ForgotPasswordRequest request) {
         userService.forgotPassword(request);
-        // Always return 200 regardless of whether the email exists (anti-enumeration)
         return ResponseEntity.ok(ApiResponse.success(null,
                 "If that email is registered, a reset link has been sent."));
     }
@@ -106,6 +115,15 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(updated, "Profile updated successfully"));
     }
 
+    @PutMapping("/me/password")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal,
+            @Valid @RequestBody ChangePasswordRequest request) {
+        userService.changePassword(principal.getUsername(), request);
+        return ResponseEntity.ok(ApiResponse.success(null, "Password changed successfully"));
+    }
+
     @DeleteMapping("/me")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> deleteAccount(
@@ -115,5 +133,16 @@ public class UserController {
         String token = authHeader.replace("Bearer ", "");
         userService.deleteAccount(principal.getUsername(), token);
         return ResponseEntity.ok(ApiResponse.success(null, "Account deleted successfully"));
+    }
+
+    /* -------------------- Trust Qualification -------------------- */
+
+    @GetMapping("/me/trust-status")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<TrustQualificationStatus>> getMyTrustStatus(
+            @AuthenticationPrincipal org.springframework.security.core.userdetails.User principal) {
+        TrustQualificationStatus status = userService.getTrustQualificationStatusForCurrentUser(
+                principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(status, "Trust qualification status retrieved"));
     }
 }

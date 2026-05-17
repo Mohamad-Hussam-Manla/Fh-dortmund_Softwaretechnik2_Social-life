@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -55,11 +56,44 @@ public class ReportController {
         return ResponseEntity.ok(ApiResponse.success(reports, "Reports retrieved"));
     }
 
+    @GetMapping("/admin/reports/{reportId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<ReportDto>> getReport(@PathVariable UUID reportId) {
+        ReportDto report = reportService.getReport(reportId);
+        return ResponseEntity.ok(ApiResponse.success(report, "Report retrieved"));
+    }
+
+    @GetMapping("/admin/reports/status/{status}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PageResponse<ReportDto>>> getReportsByStatus(
+            @PathVariable ReportStatus status,
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
+        PageResponse<ReportDto> reports = reportService.getReportsByStatus(status, pageable);
+        return ResponseEntity.ok(ApiResponse.success(reports, "Reports filtered by status"));
+    }
+
+    @GetMapping("/admin/reports/reason/{reason}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PageResponse<ReportDto>>> getReportsByReason(
+            @PathVariable ReportReason reason,
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
+        PageResponse<ReportDto> reports = reportService.getReportsByReason(reason, pageable);
+        return ResponseEntity.ok(ApiResponse.success(reports, "Reports filtered by reason"));
+    }
+
     @PatchMapping("/admin/reports/{reportId}/resolve")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<ReportDto>> resolveReport(
-            @PathVariable UUID reportId) {
-        ReportDto report = reportService.resolveReport(reportId);
+            @PathVariable UUID reportId,
+            @RequestParam(defaultValue = "false") boolean flagEvent) {
+        ReportDto report = reportService.resolveReport(reportId, flagEvent);
         return ResponseEntity.ok(ApiResponse.success(report, "Report resolved successfully"));
+    }
+
+    @DeleteMapping("/admin/reports/{reportId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteReport(@PathVariable UUID reportId) {
+        reportService.deleteReport(reportId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Report deleted successfully"));
     }
 }

@@ -2,7 +2,8 @@ package de.fhdortmund.mystudyapp.identity.service;
 
 import java.time.Instant;
 import java.util.Collections;
-import java.util.Set;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -21,8 +22,11 @@ import org.springframework.transaction.annotation.Transactional;
 import de.fhdortmund.mystudyapp.common.exception.ResourceNotFoundException;
 import de.fhdortmund.mystudyapp.common.security.JwtUtil;
 import de.fhdortmund.mystudyapp.common.service.FileStorageService;
+import de.fhdortmund.mystudyapp.events.model.Event;
+import de.fhdortmund.mystudyapp.events.model.EventMedia;
 import de.fhdortmund.mystudyapp.events.repository.EventRepository;
 import de.fhdortmund.mystudyapp.identity.dto.AuthResponse;
+import de.fhdortmund.mystudyapp.identity.dto.ChangePasswordRequest;
 import de.fhdortmund.mystudyapp.identity.dto.ForgotPasswordRequest;
 import de.fhdortmund.mystudyapp.identity.dto.LoginRequest;
 import de.fhdortmund.mystudyapp.identity.dto.PublicProfileDto;
@@ -41,7 +45,9 @@ import de.fhdortmund.mystudyapp.identity.model.VerificationToken;
 import de.fhdortmund.mystudyapp.identity.repository.PasswordResetTokenRepository;
 import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
 import de.fhdortmund.mystudyapp.identity.repository.VerificationTokenRepository;
+import de.fhdortmund.mystudyapp.moderation.repository.ReportRepository;
 import de.fhdortmund.mystudyapp.moderation.repository.ReviewRepository;
+import de.fhdortmund.mystudyapp.registration.repository.RsvpRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -63,8 +69,13 @@ public class UserService {
     private final VerificationTokenRepository verificationTokenRepository;
     private final EmailService emailService;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final RsvpRepository rsvpRepository;
+    private final ReportRepository reportRepository;
 
-    private final Set<String> blacklistedTokens = ConcurrentHashMap.newKeySet();
+    // TTL-based blacklist: token -> revocation timestamp
+    // Tokens older than 7 days are auto-evicted on every check
+    private static final long BLACKLIST_TTL_SECONDS = 604_800; // 7 days
+    private final Map<String, Instant> blacklistedTokens = new ConcurrentHashMap<>();
 
     /* ============================================================
        AUTHENTICATION
@@ -82,12 +93,11 @@ public class UserService {
                 .displayName(request.getDisplayName().trim())
                 .role(Role.STUDENT)
                 .trustLevel(TrustLevel.NEW)
-                .isVerified(false)          // explicit, though @Builder.Default covers it
+                .isVerified(false)
                 .build();
 
         User saved = userRepository.save(user);
 
-        // Create a 24-hour verification token and email it
         String tokenStr = UUID.randomUUID().toString();
         VerificationToken vToken = VerificationToken.builder()
                 .token(tokenStr)
@@ -97,7 +107,6 @@ public class UserService {
         verificationTokenRepository.save(vToken);
         emailService.sendVerificationEmail(saved.getUniversityEmail(), tokenStr);
 
-        // Do NOT return a JWT yet — the account must be verified first.
         return AuthResponse.builder().build();
     }
 
@@ -133,7 +142,7 @@ public class UserService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid or already-used verification link"));
 
         if (vToken.getExpiryDate().isBefore(Instant.now())) {
-            verificationTokenRepository.delete(vToken); // clean up expired token
+            verificationTokenRepository.delete(vToken);
             throw new IllegalArgumentException("Verification link has expired. Please register again.");
         }
 
@@ -141,32 +150,47 @@ public class UserService {
         user.setVerified(true);
         userRepository.save(user);
 
-        verificationTokenRepository.delete(vToken); // one-time use
+        verificationTokenRepository.delete(vToken);
         log.info("User {} successfully verified", user.getUniversityEmail());
     }
 
-    /**
-     * Initiates the forgot-password flow.
-     *
-     * SECURITY: We always return success even when the email is not found.
-     * This prevents user-enumeration attacks — an attacker cannot tell whether
-     * a given email address is registered by watching the response.
-     */
+    @Transactional
+    public void resendVerificationEmail(String email) {
+        String normalizedEmail = email.toLowerCase().trim();
+
+        User user = userRepository.findByUniversityEmail(normalizedEmail)
+                .orElse(null);
+
+        if (user == null || user.isVerified()) {
+            return;
+        }
+
+        verificationTokenRepository.deleteAllByUserId(user.getId());
+
+        String tokenStr = UUID.randomUUID().toString();
+        VerificationToken vToken = VerificationToken.builder()
+                .token(tokenStr)
+                .user(user)
+                .expiryDate(Instant.now().plusSeconds(86_400))
+                .build();
+        verificationTokenRepository.save(vToken);
+
+        emailService.sendVerificationEmail(normalizedEmail, tokenStr);
+        log.info("Resent verification email to {}", normalizedEmail);
+    }
+
     @Transactional
     public void forgotPassword(ForgotPasswordRequest request) {
         String email = request.getUniversityEmail().toLowerCase().trim();
 
         userRepository.findByUniversityEmail(email).ifPresent(user -> {
-            // Invalidate any existing reset tokens for this user first.
-            // This means clicking an old reset link after requesting a new one
-            // will correctly fail, with no confusion about which link to use.
             passwordResetTokenRepository.deleteAllByUserId(user.getId());
 
             String tokenStr = UUID.randomUUID().toString();
             PasswordResetToken resetToken = PasswordResetToken.builder()
                     .token(tokenStr)
                     .user(user)
-                    .expiryDate(Instant.now().plusSeconds(3_600)) // 1 hour
+                    .expiryDate(Instant.now().plusSeconds(3_600))
                     .build();
             passwordResetTokenRepository.save(resetToken);
 
@@ -175,9 +199,6 @@ public class UserService {
         });
     }
 
-    /**
-     * Validates the reset token and updates the user's password.
-     */
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
         if (!request.getNewPassword().equals(request.getConfirmPassword())) {
@@ -197,10 +218,26 @@ public class UserService {
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
-        // One-time use — delete immediately after a successful reset.
         passwordResetTokenRepository.delete(resetToken);
-
         log.info("Password successfully reset for user {}", user.getId());
+    }
+
+    @Transactional
+    public void changePassword(String email, ChangePasswordRequest request) {
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new IllegalArgumentException("New passwords do not match");
+        }
+
+        User user = findUserByEmail(email);
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+            throw new BadCredentialsException("Current password is incorrect");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        log.info("Password changed for user {}", user.getId());
     }
 
     public AuthResponse refreshToken(String refreshToken) {
@@ -208,7 +245,7 @@ public class UserService {
             throw new BadCredentialsException("Invalid refresh token");
         }
 
-        if (blacklistedTokens.contains(refreshToken)) {
+        if (isTokenBlacklisted(refreshToken)) {
             throw new BadCredentialsException("Token has been revoked");
         }
 
@@ -218,7 +255,6 @@ public class UserService {
         User user = userRepository.findByUniversityEmail(email)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // NEW: Block refresh for flagged accounts
         if (user.getTrustLevel() == TrustLevel.FLAGGED) {
             throw new LockedException("Account has been flagged. Contact support.");
         }
@@ -226,19 +262,22 @@ public class UserService {
         Authentication authentication = createAuthentication(email);
         AuthResponse response = buildAuthResponse(user, authentication);
 
-        blacklistedTokens.add(refreshToken);
+        blacklistedTokens.put(refreshToken, Instant.now());
         return response;
     }
 
     public void logout(String token) {
         if (token != null && jwtUtil.validateToken(token)) {
-            blacklistedTokens.add(token);
+            blacklistedTokens.put(token, Instant.now());
         }
         SecurityContextHolder.clearContext();
     }
 
     public boolean isTokenBlacklisted(String token) {
-        return blacklistedTokens.contains(token);
+        // Auto-evict entries older than TTL on every check
+        Instant cutoff = Instant.now().minusSeconds(BLACKLIST_TTL_SECONDS);
+        blacklistedTokens.entrySet().removeIf(e -> e.getValue().isBefore(cutoff));
+        return blacklistedTokens.containsKey(token);
     }
 
     @Transactional(readOnly = true)
@@ -277,13 +316,38 @@ public class UserService {
     @Transactional
     public void deleteAccount(String email, String currentToken) {
         User user = findUserByEmail(email);
+        UUID userId = user.getId();
 
         if (user.getProfileImageUrl() != null) {
             fileStorageService.deleteAvatar(user.getProfileImageUrl());
         }
 
+        rsvpRepository.deleteAllByUserId(userId);
+        reviewRepository.deleteAllByUserId(userId);
+        reportRepository.deleteAllByReporterId(userId);
+
+        List<Event> hostedEvents = eventRepository.findByHostId(userId);
+        for (Event event : hostedEvents) {
+            UUID eventId = event.getId();
+
+            if (event.getEventMedia() != null) {
+                for (EventMedia media : event.getEventMedia()) {
+                    fileStorageService.deleteEventMedia(media.getUrl());
+                }
+            }
+
+            rsvpRepository.deleteAllByEventId(eventId);
+            reviewRepository.deleteAllByEventId(eventId);
+            reportRepository.deleteAllByEventId(eventId);
+
+            eventRepository.delete(event);
+        }
+
+        verificationTokenRepository.deleteAllByUserId(userId);
+        passwordResetTokenRepository.deleteAllByUserId(userId);
+
         if (currentToken != null) {
-            blacklistedTokens.add(currentToken);
+            blacklistedTokens.put(currentToken, Instant.now());
         }
 
         userRepository.delete(user);
@@ -292,36 +356,55 @@ public class UserService {
     }
 
     /* ============================================================
-       PUBLIC PROFILES - CLEAN WITH PROPER METRICS
+       ADMIN USER MANAGEMENT
        ============================================================ */
 
-    /**
-     * Get public profile with trust metrics based on COMPLETED events with reviews.
-     * This prevents the exploit where users could create future events to get promoted.
-     */
+    @Transactional
+    public void deleteUserByAdmin(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        deleteAccount(user.getUniversityEmail(), null);
+        log.info("User {} deleted by admin", userId);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<UserDto> searchUsersByTrustLevel(String query, TrustLevel trustLevel, Pageable pageable) {
+        Page<User> page;
+        if (query != null && !query.isBlank()) {
+            page = userRepository.searchByDisplayNameOrEmailAndTrustLevel(query, trustLevel, pageable);
+        } else {
+            page = userRepository.findByTrustLevel(trustLevel, pageable);
+        }
+        return page.map(userMapper::toDto);
+    }
+
+    /* ============================================================
+       PUBLIC PROFILES
+       ============================================================ */
+
     @Transactional(readOnly = true)
     public PublicProfileDto getPublicProfile(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
-        // Get metrics from completed events with reviews (secure criteria)
         Long completedEventsWithReviews = eventRepository.countCompletedReviewedEventsByHostId(userId);
         Double averageRating = reviewRepository.calculateAverageRatingByHostId(userId);
-        
+
         return publicProfileMapper.toDto(user, completedEventsWithReviews, averageRating);
     }
 
-    /**
-     * Get detailed trust qualification status for transparency
-     */
     @Transactional(readOnly = true)
     public TrustQualificationStatus getTrustQualificationStatus(UUID userId) {
         return trustLevelService.getQualificationStatus(userId);
     }
 
-    /**
-     * Check qualification without side effects
-     */
+    @Transactional(readOnly = true)
+    public TrustQualificationStatus getTrustQualificationStatusForCurrentUser(String email) {
+        User user = findUserByEmail(email);
+        return getTrustQualificationStatus(user.getId());
+    }
+
     @Transactional(readOnly = true)
     public boolean qualifiesForTrustedHost(UUID userId) {
         return trustLevelService.qualifiesForTrustedHost(userId);
@@ -334,6 +417,13 @@ public class UserService {
                     .map(userMapper::toDto);
         }
         return userRepository.findAll(pageable).map(userMapper::toDto);
+    }
+
+    @Transactional(readOnly = true)
+    public UserDto getUserById(UUID userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        return userMapper.toDto(user);
     }
 
     /* ============================================================

@@ -13,18 +13,23 @@ import de.fhdortmund.mystudyapp.events.model.EventStatus;
 import de.fhdortmund.mystudyapp.identity.model.Role;
 import de.fhdortmund.mystudyapp.identity.model.TrustLevel;
 import de.fhdortmund.mystudyapp.identity.model.User;
+import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
 import de.fhdortmund.mystudyapp.mqtt.dto.OfficialEventMessage;
+import lombok.RequiredArgsConstructor;
 
 /**
- * ★ CREATIONAL PATTERN: Factory
+ * CREATIONAL PATTERN: Factory
  * Centralizes creation of Event entities from multiple sources (REST API, MQTT, etc.)
  * ensuring consistent defaults and business rules.
  */
 @Component
+@RequiredArgsConstructor
 public class EventFactory {
 
     private static final DateTimeFormatter ASTA_TIME_FORMAT = 
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    private final UserRepository userRepository;
 
     /* ==================== REST API Events ==================== */
 
@@ -53,10 +58,12 @@ public class EventFactory {
      * Creates an Event from an AStA MQTT message.
      * Official events are always PUBLISHED and use a synthetic AStA host.
      */
-    public Event createOfficialEvent(OfficialEventMessage message, User astaHost) {
+    public Event createOfficialEvent(OfficialEventMessage message) {
         LocalDateTime startLocal = LocalDateTime.parse(message.getTime(), ASTA_TIME_FORMAT);
         Instant startTime = startLocal.atZone(ZoneId.of("Europe/Berlin")).toInstant();
         Instant endTime = startTime.plusSeconds(7200); // Default 2-hour duration
+
+        User astaHost = getOrCreateAstaHost();
 
         return Event.builder()
                 .host(astaHost)
@@ -69,5 +76,20 @@ public class EventFactory {
                 .currentRsvpCount(0)
                 .status(EventStatus.PUBLISHED) // Official events skip review
                 .build();
+    }
+
+    private User getOrCreateAstaHost() {
+        return userRepository.findByUniversityEmail("asta@fh-dortmund.de")
+                .orElseGet(() -> {
+                    User newHost = User.builder()
+                            .universityEmail("asta@fh-dortmund.de")
+                            .displayName("AStA Official")
+                            .passwordHash("system-generated-no-login-allowed")
+                            .role(Role.ADMIN)
+                            .trustLevel(TrustLevel.TRUSTED_HOST)
+                            .isVerified(true)
+                            .build();
+                    return userRepository.save(newHost);
+                });
     }
 }

@@ -14,7 +14,12 @@ public class StorageConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:" + storageProperties.getAvatarLocation() + "/");
+        // Avatars served at /uploads/avatars/**
+        registry.addResourceHandler("/uploads/avatars/**")
+                .addResourceLocations("file:" + storageProperties.getAvatarLocation() + "/avatars/");
+
+        // Event media served at /uploads/events/**
+        registry.addResourceHandler("/uploads/events/**")
+                .addResourceLocations("file:" + storageProperties.getEventMediaLocation() + "/events/");
     }
 }

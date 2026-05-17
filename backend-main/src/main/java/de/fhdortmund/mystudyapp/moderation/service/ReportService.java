@@ -18,6 +18,7 @@ import de.fhdortmund.mystudyapp.common.exception.ForbiddenActionException;
 import de.fhdortmund.mystudyapp.common.exception.ResourceNotFoundException;
 import de.fhdortmund.mystudyapp.common.response.PageResponse;
 import de.fhdortmund.mystudyapp.events.model.Event;
+import de.fhdortmund.mystudyapp.events.model.EventStatus;
 import de.fhdortmund.mystudyapp.events.repository.EventRepository;
 import de.fhdortmund.mystudyapp.identity.model.User;
 import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
@@ -75,7 +76,7 @@ public class ReportService {
         Report saved = reportRepository.save(report);
         log.info("Report created: {} for event {} by {}", saved.getId(), event.getId(), reporterEmail);
 
-        // ★ MQTT INTEGRATION: Publish critical alerts to backend-asta
+        // MQTT INTEGRATION: Publish critical alerts to backend-asta
         if (request.getReason() == ReportReason.INAPPROPRIATE || request.getReason() == ReportReason.FAKE_EVENT) {
             publishCriticalAlert(saved, event, reporter);
         }
@@ -85,7 +86,6 @@ public class ReportService {
 
     /**
      * Publishes a critical report alert via MQTT to the AStA backend.
-     * This enables real-time moderation notifications across distributed systems.
      */
     private void publishCriticalAlert(Report report, Event event, User reporter) {
         try {
@@ -104,10 +104,9 @@ public class ReportService {
             String jsonPayload = objectMapper.writeValueAsString(alertPayload);
             alertMqttGateway.sendAlert(jsonPayload);
 
-            log.warn("🚨 CRITICAL ALERT published via MQTT: Report {} for event '{}' (Reason: {})",
+            log.warn("CRITICAL ALERT published via MQTT: Report {} for event '{}' (Reason: {})",
                     report.getId(), event.getTitle(), report.getReason());
         } catch (Exception e) {
-            // Fail-safe: Log but don't break the report submission if MQTT is down
             log.error("Failed to publish MQTT alert for report {}: {}", report.getId(), e.getMessage());
         }
     }
@@ -148,8 +147,20 @@ public class ReportService {
 
     @Transactional
     public ReportDto resolveReport(UUID reportId) {
+        return resolveReport(reportId, false);
+    }
+
+    @Transactional
+    public ReportDto resolveReport(UUID reportId, boolean flagEvent) {
         Report report = reportRepository.findById(reportId)
                 .orElseThrow(() -> new ResourceNotFoundException("Report", "id", reportId));
+
+        if (flagEvent) {
+            Event event = report.getEvent();
+            event.setStatus(EventStatus.UNDER_REVIEW);
+            eventRepository.save(event);
+            log.info("Event {} flagged to UNDER_REVIEW via report resolution {}", event.getId(), reportId);
+        }
 
         report.setStatus(ReportStatus.RESOLVED);
         Report saved = reportRepository.save(report);

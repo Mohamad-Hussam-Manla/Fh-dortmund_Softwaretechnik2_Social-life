@@ -12,27 +12,28 @@ import de.fhdortmund.mystudyapp.events.model.EventStatus;
 import de.fhdortmund.mystudyapp.identity.model.Role;
 import de.fhdortmund.mystudyapp.identity.model.TrustLevel;
 import de.fhdortmund.mystudyapp.identity.model.User;
+import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
 import de.fhdortmund.mystudyapp.mqtt.adapter.EventMessageTarget;
+import lombok.RequiredArgsConstructor;
 
-/**
- * ★ STRUCTURAL PATTERN: Adapter
- * Converts AStA's JSON format (activity_name, time, venue) into our internal Event entity.
- */
 @Component
+@RequiredArgsConstructor
 public class OfficialEventAdapter implements EventMessageTarget {
 
     private static final DateTimeFormatter ASTA_TIME_FORMAT = 
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+            
+    // Inject the UserRepository to talk to the database
+    private final UserRepository userRepository;
 
     @Override
     public Event adapt(OfficialEventMessage message) {
-        // Parse AStA's flat format into our rich domain model
         LocalDateTime startLocal = LocalDateTime.parse(message.getTime(), ASTA_TIME_FORMAT);
         Instant startTime = startLocal.atZone(ZoneId.of("Europe/Berlin")).toInstant();
-        Instant endTime = startTime.plusSeconds(7200); // Default 2-hour duration
+        Instant endTime = startTime.plusSeconds(7200); 
 
-        // Create a synthetic "AStA Official" host user
-        User astaHost = createAstaHost();
+        // Fetch or create the managed user from the database securely
+        User astaHost = getOrCreateAstaHost();
 
         return Event.builder()
                 .host(astaHost)
@@ -41,18 +42,25 @@ public class OfficialEventAdapter implements EventMessageTarget {
                 .location(message.getVenue())
                 .startTime(startTime)
                 .endTime(endTime)
-                .maxCapacity(100) // Default for official events
+                .maxCapacity(100) 
                 .currentRsvpCount(0)
-                .status(EventStatus.PUBLISHED) // Official events skip review
+                .status(EventStatus.PUBLISHED) 
                 .build();
     }
 
-    private User createAstaHost() {
-        return User.builder()
-                .universityEmail("asta@fh-dortmund.de")
-                .displayName("AStA Official")
-                .role(Role.ADMIN)
-                .trustLevel(TrustLevel.TRUSTED_HOST)
-                .build();
+    private User getOrCreateAstaHost() {
+        return userRepository.findByUniversityEmail("asta@fh-dortmund.de")
+                .orElseGet(() -> {
+                    User newHost = User.builder()
+                            .universityEmail("asta@fh-dortmund.de")
+                            .displayName("AStA Official")
+                            // Required by your DB schema, even for system accounts
+                            .passwordHash("system-generated-no-login-allowed") 
+                            .role(Role.ADMIN)
+                            .trustLevel(TrustLevel.TRUSTED_HOST)
+                            .isVerified(true)
+                            .build();
+                    return userRepository.save(newHost); // Saves to DB before assigning to Event
+                });
     }
 }
