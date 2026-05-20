@@ -58,4 +58,10 @@ public class Rsvp {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /** Reason provided when user cancels their RSVP */
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
+    private String cancellationReason;
 }

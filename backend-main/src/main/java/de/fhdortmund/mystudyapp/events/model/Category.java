@@ -28,4 +28,19 @@ public class Category {
 
     @Column(name = "name", unique = true, nullable = false)
     private String name;
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /** Icon identifier (e.g., "music", "tech", "sports") — maps to frontend SVG */
+    @Column(name = "icon", length = 50)
+    private String icon;
+
+    /** Hex color for category badge background (e.g., "#FF5733") */
+    @Column(name = "color", length = 7)
+    private String color;
+
+    /** Sort order for category list display */
+    @Column(name = "sort_order", nullable = false)
+    @Builder.Default
+    private Integer sortOrder = 0;
 }

@@ -53,4 +53,19 @@ public class EventMedia {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /** 400x300 thumbnail URL for event cards */
+    @Column(name = "thumbnail_url", length = 500)
+    private String thumbnailUrl;
+
+    /** 800x600 medium URL for detail views */
+    @Column(name = "medium_url", length = 500)
+    private String mediumUrl;
+
+    /** Display order for media carousel (0 = first/cover) */
+    @Column(name = "display_order", nullable = false)
+    @Builder.Default
+    private Integer displayOrder = 0;
 }

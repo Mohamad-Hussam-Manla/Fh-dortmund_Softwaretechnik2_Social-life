@@ -13,6 +13,8 @@ import de.fhdortmund.mystudyapp.identity.model.TrustLevel;
 import de.fhdortmund.mystudyapp.identity.model.User;
 import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
 import de.fhdortmund.mystudyapp.moderation.repository.ReviewRepository;
+import de.fhdortmund.mystudyapp.notification.model.NotificationType;
+import de.fhdortmund.mystudyapp.notification.publisher.NotificationEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,9 +30,8 @@ public class TrustLevelService {
     private final EventRepository eventRepository;
     private final ReviewRepository reviewRepository;
 
-    /* ============================================================
-       ADMIN / MANUAL TRUST MANAGEMENT
-       ============================================================ */
+    // PHASE 1.3: Notify users of trust level changes
+    private final NotificationEventPublisher notificationPublisher;
 
     @Transactional
     public void updateTrustLevel(UUID userId, TrustLevel newLevel) {
@@ -49,9 +50,6 @@ public class TrustLevelService {
         log.warn("User {} has been flagged", userId);
     }
 
-    /**
-     * Manual promotion by an admin. Bypasses qualification checks.
-     */
     @Transactional
     public void forcePromoteToTrustedHost(UUID userId) {
         User user = getUserOrThrow(userId);
@@ -66,10 +64,6 @@ public class TrustLevelService {
         log.info("User {} manually promoted to TRUSTED_HOST", userId);
     }
 
-    /**
-     * Auto-promotion with guardrails. Only promotes NEW users who meet the criteria.
-     * Criteria: Hosted 3+ COMPLETED events that have reviews AND average rating ≥ 4.0
-     */
     @Transactional
     public void promoteToTrustedHost(UUID userId) {
         User user = getUserOrThrow(userId);
@@ -88,30 +82,27 @@ public class TrustLevelService {
 
         user.setTrustLevel(TrustLevel.TRUSTED_HOST);
         userRepository.save(user);
+
+        // PHASE 1.3: Notify user of trust promotion
+        notificationPublisher.publish(
+                userId,
+                NotificationType.TRUST_PROMOTED,
+                "Congratulations! You're a Trusted Host",
+                "You've hosted " + MIN_HOSTED_EVENTS + "+ events with great reviews. You can now publish events instantly without review!",
+                null,
+                null,
+                "/profile"
+        );
+
         log.info("User {} auto-promoted to TRUSTED_HOST", userId);
     }
 
-    /* ============================================================
-       QUALIFICATION ENGINE
-       ============================================================ */
-
-    /**
-     * Evaluates whether a user qualifies for TRUSTED_HOST.
-     * Criteria:
-     *   1. Hosted at least {@value #MIN_HOSTED_EVENTS} COMPLETED events that have reviews
-     *   2. Average rating across all reviews for those events >= {@value #MIN_AVERAGE_RATING}
-     * 
-     * This prevents exploitation where users could create future events without attendees
-     * to get auto-promoted. Events must be COMPLETED (actually happened) AND have reviews
-     * (someone attended and rated them).
-     */
     @Transactional(readOnly = true)
     public boolean qualifiesForTrustedHost(UUID userId) {
         if (!userRepository.existsById(userId)) {
             throw new ResourceNotFoundException("User", "id", userId);
         }
 
-        // Count COMPLETED events that have at least one review
         Long hostedCount = eventRepository.countCompletedReviewedEventsByHostId(userId);
         long eventCount = (hostedCount != null) ? hostedCount : 0L;
 
@@ -121,7 +112,6 @@ public class TrustLevelService {
             return false;
         }
 
-        // Calculate average rating across all reviews for COMPLETED events
         Double avgRating = reviewRepository.calculateAverageRatingByHostId(userId);
         double effectiveRating = (avgRating != null) ? avgRating : 0.0;
 
@@ -133,9 +123,6 @@ public class TrustLevelService {
         return qualifies;
     }
 
-    /**
-     * Get detailed qualification status for debugging/UI display
-     */
     @Transactional(readOnly = true)
     public TrustQualificationStatus getQualificationStatus(UUID userId) {
         if (!userRepository.existsById(userId)) {
@@ -144,10 +131,10 @@ public class TrustLevelService {
 
         Long completedReviewedCount = eventRepository.countCompletedReviewedEventsByHostId(userId);
         long eventCount = (completedReviewedCount != null) ? completedReviewedCount : 0L;
-        
+
         Double avgRating = reviewRepository.calculateAverageRatingByHostId(userId);
         double effectiveRating = (avgRating != null) ? avgRating : 0.0;
-        
+
         return TrustQualificationStatus.builder()
                 .completedEventsWithReviews(eventCount)
                 .minimumEventsRequired(MIN_HOSTED_EVENTS)
@@ -159,12 +146,9 @@ public class TrustLevelService {
                 .build();
     }
 
-    /* ============================================================
-       PRIVATE HELPERS
-       ============================================================ */
-
     private User getUserOrThrow(UUID userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
     }
 }
+

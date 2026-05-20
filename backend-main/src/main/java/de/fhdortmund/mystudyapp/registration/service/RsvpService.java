@@ -16,8 +16,11 @@ import de.fhdortmund.mystudyapp.common.response.PageResponse;
 import de.fhdortmund.mystudyapp.events.model.Event;
 import de.fhdortmund.mystudyapp.events.model.EventStatus;
 import de.fhdortmund.mystudyapp.events.repository.EventRepository;
+import de.fhdortmund.mystudyapp.events.service.EventSseService;
 import de.fhdortmund.mystudyapp.identity.model.User;
 import de.fhdortmund.mystudyapp.identity.repository.UserRepository;
+import de.fhdortmund.mystudyapp.notification.model.NotificationType;
+import de.fhdortmund.mystudyapp.notification.publisher.NotificationEventPublisher;
 import de.fhdortmund.mystudyapp.registration.dto.RsvpDto;
 import de.fhdortmund.mystudyapp.registration.mapper.RsvpMapper;
 import de.fhdortmund.mystudyapp.registration.model.Rsvp;
@@ -38,7 +41,11 @@ public class RsvpService {
     private final RsvpMapper rsvpMapper;
     private final RsvpEventPublisher eventPublisher;
 
-    /* ==================== CRUD ==================== */
+    // PHASE 1.3: Notify host of RSVP cancellations
+    private final NotificationEventPublisher notificationPublisher;
+
+    // PHASE 1.4: Real-time RSVP count updates
+    private final EventSseService sseService;
 
     @Transactional
     public RsvpDto createRsvp(UUID eventId, String userEmail) {
@@ -54,6 +61,11 @@ public class RsvpService {
 
         if (event.getEndTime().isBefore(Instant.now())) {
             throw new ForbiddenActionException("rsvp", "Cannot RSVP to an event that has already ended");
+        }
+
+        // PHASE 2: Cannot RSVP to deleted events
+        if (event.getDeletedAt() != null) {
+            throw new ForbiddenActionException("rsvp", "Event has been deleted");
         }
 
         Optional<Rsvp> existing = rsvpRepository.findByEventIdAndUserId(eventId, user.getId());
@@ -72,6 +84,9 @@ public class RsvpService {
                 .build();
 
         Rsvp saved = rsvpRepository.save(rsvp);
+
+        // PHASE 1.4: Broadcast RSVP update to all event subscribers
+        sseService.notifyRsvpUpdate(eventId, event.getCurrentRsvpCount() + (updated > 0 ? 1 : 0), event.getMaxCapacity());
 
         log.info("RSVP created: {} for event {} by {} with status {}", saved.getId(), eventId, userEmail, status);
         return rsvpMapper.toDto(saved);
@@ -95,12 +110,16 @@ public class RsvpService {
         }
 
         Rsvp saved = rsvpRepository.save(existing);
+
+        // PHASE 1.4: Broadcast update
+        sseService.notifyRsvpUpdate(event.getId(), event.getCurrentRsvpCount() + (updated > 0 ? 1 : 0), event.getMaxCapacity());
+
         log.info("RSVP reactivated: {} for event {} with status {}", saved.getId(), event.getId(), saved.getStatus());
         return rsvpMapper.toDto(saved);
     }
 
     @Transactional
-    public RsvpDto cancelRsvp(UUID rsvpId, String userEmail) {
+    public RsvpDto cancelRsvp(UUID rsvpId, String userEmail, String reason) {
         User user = userRepository.findByUniversityEmail(userEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
@@ -121,14 +140,33 @@ public class RsvpService {
 
         boolean wasGoing = rsvp.getStatus() == RsvpStatus.GOING;
         rsvp.setStatus(RsvpStatus.CANCELLED);
+        rsvp.setCancellationReason(reason);  // PHASE 2
         Rsvp saved = rsvpRepository.save(rsvp);
 
         if (wasGoing) {
             eventRepository.decrementRsvpCount(rsvp.getEvent().getId());
             eventPublisher.publishRsvpCancelled(rsvp.getEvent().getId(), rsvpId);
+
+            // PHASE 1.3: Notify host that someone cancelled
+            String message = reason != null && !reason.isBlank()
+        ? user.getDisplayName() + " cancelled their RSVP for \"" + rsvp.getEvent().getTitle() + "\". Reason: " + reason
+        : user.getDisplayName() + " cancelled their RSVP for \"" + rsvp.getEvent().getTitle() + "\".";
+
+            notificationPublisher.publishEventNotification(
+                rsvp.getEvent().getHost().getId(),
+                NotificationType.RSVP_CANCELLED,
+                "Attendee Cancelled",
+                message,
+                rsvp.getEvent().getId(),
+                rsvp.getEvent().getTitle()
+            );
         }
 
-        log.info("RSVP cancelled: {} by {}", rsvpId, userEmail);
+        // PHASE 1.4: Broadcast RSVP update (count decreased)
+        Event event = rsvp.getEvent();
+        sseService.notifyRsvpUpdate(event.getId(), Math.max(0, event.getCurrentRsvpCount() - 1), event.getMaxCapacity());
+
+        log.info("RSVP cancelled: {} by {}. Reason: {}", rsvpId, userEmail, reason);
         return rsvpMapper.toDto(saved);
     }
 
@@ -161,7 +199,37 @@ public class RsvpService {
         return rsvpMapper.toDto(saved);
     }
 
-    /* ==================== Waitlist Position ==================== */
+    /**
+     * PHASE 2: Self check-in via QR code.
+     */
+    @Transactional
+    public RsvpDto checkIn(UUID eventId, String code, String userEmail) {
+        User user = userRepository.findByUniversityEmail(userEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("Event", "id", eventId));
+
+        if (event.getDeletedAt() != null) {
+            throw new ForbiddenActionException("check-in", "Event has been deleted");
+        }
+
+        if (event.getCheckInCode() == null || !event.getCheckInCode().equalsIgnoreCase(code)) {
+            throw new ForbiddenActionException("check-in", "Invalid check-in code");
+        }
+
+        Rsvp rsvp = rsvpRepository.findByEventIdAndUserId(eventId, user.getId())
+                .orElseThrow(() -> new ForbiddenActionException("check-in", "You must RSVP to this event before checking in"));
+
+        if (rsvp.getStatus() != RsvpStatus.GOING) {
+            throw new ForbiddenActionException("check-in", "Only confirmed attendees can check in");
+        }
+
+        rsvp.setStatus(RsvpStatus.ATTENDED);
+        Rsvp saved = rsvpRepository.save(rsvp);
+        log.info("Self check-in: RSVP {} at event {} by {}", saved.getId(), eventId, userEmail);
+        return rsvpMapper.toDto(saved);
+    }
 
     @Transactional(readOnly = true)
     public int getWaitlistPosition(UUID rsvpId, String userEmail) {
@@ -184,8 +252,6 @@ public class RsvpService {
 
         return (int) ahead + 1;
     }
-
-    /* ==================== Queries ==================== */
 
     @Transactional(readOnly = true)
     public RsvpDto getMyRsvpForEvent(UUID eventId, String userEmail) {
@@ -238,8 +304,6 @@ public class RsvpService {
         Page<Rsvp> page = rsvpRepository.findByEventIdAndStatus(eventId, status, pageable);
         return buildPageResponse(page);
     }
-
-    /* ==================== Helpers ==================== */
 
     private PageResponse<RsvpDto> buildPageResponse(Page<Rsvp> page) {
         return PageResponse.<RsvpDto>builder()

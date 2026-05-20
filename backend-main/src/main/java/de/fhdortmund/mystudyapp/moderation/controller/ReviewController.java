@@ -21,6 +21,7 @@ import de.fhdortmund.mystudyapp.common.response.ApiResponse;
 import de.fhdortmund.mystudyapp.common.response.PageResponse;
 import de.fhdortmund.mystudyapp.moderation.dto.CreateReviewRequest;
 import de.fhdortmund.mystudyapp.moderation.dto.ReviewDto;
+import de.fhdortmund.mystudyapp.moderation.dto.ReviewReportRequest;
 import de.fhdortmund.mystudyapp.moderation.service.ReviewService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,8 @@ import lombok.RequiredArgsConstructor;
 public class ReviewController {
 
     private final ReviewService reviewService;
+
+    /* -------------------- CRUD -------------------- */
 
     @PostMapping("/reviews")
     @PreAuthorize("isAuthenticated()")
@@ -46,8 +49,10 @@ public class ReviewController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<ReviewDto>>> getEventReviews(
             @PathVariable UUID eventId,
-            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
-        PageResponse<ReviewDto> reviews = reviewService.getReviewsByEventId(eventId, pageable);
+            @PageableDefault(size = 20, sort = "helpfulCount") Pageable pageable,
+            @AuthenticationPrincipal User principal) {
+        PageResponse<ReviewDto> reviews = reviewService.getReviewsByEventId(
+                eventId, pageable, principal.getUsername());
         return ResponseEntity.ok(ApiResponse.success(reviews, "Reviews retrieved"));
     }
 
@@ -55,8 +60,10 @@ public class ReviewController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<ReviewDto>>> getHostReviews(
             @PathVariable UUID hostId,
-            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
-        PageResponse<ReviewDto> reviews = reviewService.getReviewsByHostId(hostId, pageable);
+            @PageableDefault(size = 20, sort = "createdAt") Pageable pageable,
+            @AuthenticationPrincipal User principal) {
+        PageResponse<ReviewDto> reviews = reviewService.getReviewsByHostId(
+                hostId, pageable, principal.getUsername());
         return ResponseEntity.ok(ApiResponse.success(reviews, "Host reviews retrieved"));
     }
 
@@ -67,5 +74,42 @@ public class ReviewController {
             @AuthenticationPrincipal User principal) {
         reviewService.deleteReview(reviewId, principal.getUsername());
         return ResponseEntity.ok(ApiResponse.success(null, "Review deleted successfully"));
+    }
+
+    /* ==================== PHASE 3: HELPFUL VOTE ==================== */
+
+    /**
+     * Toggle helpful vote on a review.
+     * POST /api/reviews/{id}/helpful
+     * Returns the updated review with current user's vote status.
+     */
+    @PostMapping("/reviews/{reviewId}/helpful")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<ReviewDto>> toggleHelpful(
+            @PathVariable UUID reviewId,
+            @AuthenticationPrincipal User principal) {
+        ReviewDto review = reviewService.toggleHelpfulVote(reviewId, principal.getUsername());
+        String message = Boolean.TRUE.equals(review.getIsHelpfulByCurrentUser())
+                ? "Marked as helpful"
+                : "Removed helpful mark";
+        return ResponseEntity.ok(ApiResponse.success(review, message));
+    }
+
+    /* ==================== PHASE 3: REVIEW REPORTING ==================== */
+
+    /**
+     * Report a review as inappropriate.
+     * POST /api/reviews/{id}/report
+     * Creates a moderation report with reason INAPPROPRIATE.
+     */
+    @PostMapping("/reviews/{reviewId}/report")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> reportReview(
+            @PathVariable UUID reviewId,
+            @Valid @RequestBody ReviewReportRequest request,
+            @AuthenticationPrincipal User principal) {
+        reviewService.reportReview(reviewId, request, principal.getUsername());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(null, "Review reported successfully"));
     }
 }

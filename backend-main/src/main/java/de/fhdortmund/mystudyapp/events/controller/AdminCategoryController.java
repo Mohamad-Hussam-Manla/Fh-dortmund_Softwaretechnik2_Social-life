@@ -34,7 +34,8 @@ public class AdminCategoryController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<List<Category>>> getAllCategories() {
-        return ResponseEntity.ok(ApiResponse.success(categoryRepository.findAll(), "Categories retrieved"));
+        return ResponseEntity.ok(ApiResponse.success(
+                categoryRepository.findAllByOrderBySortOrderAsc(), "Categories retrieved"));
     }
 
     @PostMapping
@@ -47,6 +48,9 @@ public class AdminCategoryController {
 
         Category category = Category.builder()
                 .name(name)
+                .icon(request.getIcon())
+                .color(request.getColor())
+                .sortOrder(request.getSortOrder() != null ? request.getSortOrder() : 0)
                 .build();
         Category saved = categoryRepository.save(category);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -66,6 +70,13 @@ public class AdminCategoryController {
         }
 
         category.setName(newName);
+        // PHASE 3: Update visual fields
+        category.setIcon(request.getIcon());
+        category.setColor(request.getColor());
+        if (request.getSortOrder() != null) {
+            category.setSortOrder(request.getSortOrder());
+        }
+
         Category saved = categoryRepository.save(category);
         return ResponseEntity.ok(ApiResponse.success(saved, "Category updated"));
     }
@@ -83,5 +94,18 @@ public class AdminCategoryController {
         @NotBlank(message = "Category name is required")
         @Size(min = 1, max = 50, message = "Name must be between 1 and 50 characters")
         private String name;
+
+        /* ==================== PHASE 3 ADDITIONS ==================== */
+
+        /** Icon identifier (e.g., "music", "tech", "sports") */
+        @Size(max = 50, message = "Icon must not exceed 50 characters")
+        private String icon;
+
+        /** Hex color for badge background (e.g., "#FF5733") */
+        @Size(max = 7, message = "Color must be a valid hex code")
+        private String color;
+
+        /** Sort order for display */
+        private Integer sortOrder;
     }
 }

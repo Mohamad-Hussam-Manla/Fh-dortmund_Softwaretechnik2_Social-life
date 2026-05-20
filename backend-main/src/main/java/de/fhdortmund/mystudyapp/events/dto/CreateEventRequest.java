@@ -34,4 +34,10 @@ public class CreateEventRequest {
     private Integer maxCapacity;
 
     private Set<Integer> categoryIds;
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /** Optional custom slug (auto-generated from title if not provided) */
+    @Size(max = 150, message = "Slug must not exceed 150 characters")
+    private String slug;
 }

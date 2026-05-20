@@ -61,4 +61,11 @@ public class Review {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
+
+    /* ==================== PHASE 3 ADDITIONS ==================== */
+
+    /** Denormalized counter â€” incremented/decremented when users vote helpful */
+    @Column(name = "helpful_count", nullable = false)
+    @Builder.Default
+    private Integer helpfulCount = 0;
 }

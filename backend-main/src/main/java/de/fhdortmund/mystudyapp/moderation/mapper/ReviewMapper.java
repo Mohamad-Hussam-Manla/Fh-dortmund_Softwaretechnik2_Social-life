@@ -22,6 +22,19 @@ public class ReviewMapper {
                 .rating(review.getRating())
                 .comment(review.getComment())
                 .createdAt(review.getCreatedAt())
+                // PHASE 3: map denormalized helpful count
+                .helpfulCount(review.getHelpfulCount())
                 .build();
+    }
+
+    /**
+     * PHASE 3: Overloaded method that includes current user's vote status.
+     */
+    public ReviewDto toDto(Review review, boolean isHelpfulByCurrentUser) {
+        ReviewDto dto = toDto(review);
+        if (dto != null) {
+            dto.setIsHelpfulByCurrentUser(isHelpfulByCurrentUser);
+        }
+        return dto;
     }
 }

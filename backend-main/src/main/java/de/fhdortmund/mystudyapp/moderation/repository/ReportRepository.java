@@ -29,4 +29,8 @@ public interface ReportRepository extends JpaRepository<Report, UUID> {
     @Modifying
     @Query("DELETE FROM Report r WHERE r.reporter.id = :userId")
     void deleteAllByReporterId(@Param("userId") UUID userId);
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    long countByStatus(ReportStatus status);
 }

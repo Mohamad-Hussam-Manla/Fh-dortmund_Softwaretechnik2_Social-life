@@ -44,6 +44,13 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     @Query("SELECT r.rating, COUNT(r) FROM Review r JOIN r.event e WHERE e.host.id = :hostId GROUP BY r.rating")
     List<Object[]> getRatingDistributionForHost(@Param("hostId") UUID hostId);
 
+    /* ============================================================
+       PHASE 0: Host aggregate for total review count
+       ============================================================ */
+
+    @Query("SELECT COUNT(r) FROM Review r JOIN r.event e WHERE e.host.id = :hostId")
+    Long countTotalReviewsByHostId(@Param("hostId") UUID hostId);
+
     /* -------------------- Bulk Deletion (Phase 3) -------------------- */
 
     @Modifying
@@ -53,4 +60,19 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     @Modifying
     @Query("DELETE FROM Review r WHERE r.reviewer.id = :userId")
     void deleteAllByUserId(@Param("userId") UUID userId);
+
+    /* ==================== PHASE 3 ADDITIONS ==================== */
+
+    /** Sort reviews by helpfulness (most helpful first), then by date */
+    Page<Review> findByEventIdOrderByHelpfulCountDescCreatedAtDesc(UUID eventId, Pageable pageable);
+
+    /** Increment denormalized helpful count */
+    @Modifying
+    @Query("UPDATE Review r SET r.helpfulCount = r.helpfulCount + 1 WHERE r.id = :reviewId")
+    int incrementHelpfulCount(@Param("reviewId") UUID reviewId);
+
+    /** Decrement denormalized helpful count */
+    @Modifying
+    @Query("UPDATE Review r SET r.helpfulCount = r.helpfulCount - 1 WHERE r.id = :reviewId AND r.helpfulCount > 0")
+    int decrementHelpfulCount(@Param("reviewId") UUID reviewId);
 }

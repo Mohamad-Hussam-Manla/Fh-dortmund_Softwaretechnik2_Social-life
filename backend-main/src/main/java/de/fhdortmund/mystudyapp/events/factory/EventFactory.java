@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import de.fhdortmund.mystudyapp.events.dto.CreateEventRequest;
 import de.fhdortmund.mystudyapp.events.model.Event;
 import de.fhdortmund.mystudyapp.events.model.EventStatus;
+import de.fhdortmund.mystudyapp.events.service.SlugGenerator;
 import de.fhdortmund.mystudyapp.identity.model.Role;
 import de.fhdortmund.mystudyapp.identity.model.TrustLevel;
 import de.fhdortmund.mystudyapp.identity.model.User;
@@ -30,6 +31,7 @@ public class EventFactory {
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     private final UserRepository userRepository;
+    private final SlugGenerator slugGenerator;
 
     /* ==================== REST API Events ==================== */
 
@@ -38,6 +40,10 @@ public class EventFactory {
                 || host.getRole() == Role.ADMIN)
                 ? EventStatus.PUBLISHED
                 : EventStatus.UNDER_REVIEW;
+
+        String slug = request.getSlug() != null && !request.getSlug().isBlank()
+                ? request.getSlug()
+                : slugGenerator.generateSlug(request.getTitle());
 
         return Event.builder()
                 .host(host)
@@ -49,6 +55,32 @@ public class EventFactory {
                 .maxCapacity(request.getMaxCapacity())
                 .currentRsvpCount(0)
                 .status(initialStatus)
+                .slug(slug)
+                .viewCount(0L)
+                .build();
+    }
+
+    /**
+     * PHASE 2: Create a draft event — bypasses trust level checks and date validation.
+     * Drafts are private to the host until published.
+     */
+    public Event createDraft(CreateEventRequest request, User host) {
+        String slug = request.getSlug() != null && !request.getSlug().isBlank()
+                ? request.getSlug()
+                : slugGenerator.generateSlug(request.getTitle());
+
+        return Event.builder()
+                .host(host)
+                .title(request.getTitle().trim())
+                .description(request.getDescription() != null ? request.getDescription().trim() : null)
+                .location(request.getLocation() != null ? request.getLocation().trim() : "TBD")
+                .startTime(request.getStartTime())
+                .endTime(request.getEndTime())
+                .maxCapacity(request.getMaxCapacity() != null ? request.getMaxCapacity() : 10)
+                .currentRsvpCount(0)
+                .status(EventStatus.DRAFT)
+                .slug(slug)
+                .viewCount(0L)
                 .build();
     }
 
@@ -75,6 +107,8 @@ public class EventFactory {
                 .maxCapacity(100) // Default for official events
                 .currentRsvpCount(0)
                 .status(EventStatus.PUBLISHED) // Official events skip review
+                .slug(slugGenerator.generateSlug(message.getActivityName()))
+                .viewCount(0L)
                 .build();
     }
 

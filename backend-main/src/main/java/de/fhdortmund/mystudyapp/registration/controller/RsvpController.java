@@ -13,14 +13,19 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import de.fhdortmund.mystudyapp.common.response.ApiResponse;
 import de.fhdortmund.mystudyapp.common.response.PageResponse;
+import de.fhdortmund.mystudyapp.events.dto.CheckInRequest;
+import de.fhdortmund.mystudyapp.registration.dto.CancelRsvpRequest;
 import de.fhdortmund.mystudyapp.registration.dto.RsvpDto;
 import de.fhdortmund.mystudyapp.registration.model.RsvpStatus;
 import de.fhdortmund.mystudyapp.registration.service.RsvpService;
+import de.fhdortmund.mystudyapp.registration.service.WaitlistService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -29,6 +34,7 @@ import lombok.RequiredArgsConstructor;
 public class RsvpController {
 
     private final RsvpService rsvpService;
+    private final WaitlistService waitlistService;
 
     /* -------------------- Participant Operations -------------------- */
 
@@ -64,8 +70,10 @@ public class RsvpController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<RsvpDto>> cancelRsvp(
             @PathVariable UUID rsvpId,
+            @Valid @RequestBody(required = false) CancelRsvpRequest request,
             @AuthenticationPrincipal User principal) {
-        RsvpDto rsvp = rsvpService.cancelRsvp(rsvpId, principal.getUsername());
+        String reason = request != null ? request.getReason() : null;
+        RsvpDto rsvp = rsvpService.cancelRsvp(rsvpId, principal.getUsername(), reason);
         return ResponseEntity.ok(ApiResponse.success(rsvp, "Registration cancelled successfully"));
     }
 
@@ -114,5 +122,33 @@ public class RsvpController {
             @AuthenticationPrincipal User principal) {
         RsvpDto rsvp = rsvpService.markAttended(eventId, rsvpId, principal.getUsername());
         return ResponseEntity.ok(ApiResponse.success(rsvp, "Attendance marked successfully"));
+    }
+
+    /**
+     * PHASE 2: Host manually promotes a waitlisted user to GOING.
+     */
+    @PatchMapping("/events/{eventId}/rsvps/{rsvpId}/promote")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<RsvpDto>> promoteWaitlistedUser(
+            @PathVariable UUID eventId,
+            @PathVariable UUID rsvpId,
+            @AuthenticationPrincipal User principal) {
+        RsvpDto rsvp = waitlistService.promoteWaitlistedUser(eventId, rsvpId, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(rsvp, "User promoted from waitlist"));
+    }
+
+       /**
+     * PHASE 2 / 4.1: Self check-in via QR code.
+     * Attendee scans host's QR and submits the code in the request body.
+     * Transitions RSVP status from GOING → ATTENDED if code matches.
+     */
+    @PostMapping("/events/{eventId}/check-in")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<RsvpDto>> checkIn(
+            @PathVariable UUID eventId,
+            @Valid @RequestBody CheckInRequest request,
+            @AuthenticationPrincipal User principal) {
+        RsvpDto rsvp = rsvpService.checkIn(eventId, request.getCode(), principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(rsvp, "Check-in successful"));
     }
 }

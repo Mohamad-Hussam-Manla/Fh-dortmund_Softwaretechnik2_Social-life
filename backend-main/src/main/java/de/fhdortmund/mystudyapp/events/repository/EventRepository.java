@@ -78,11 +78,13 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
     /**
      * Filtered feed query. All parameters are optional (NULL = ignored).
      * DISTINCT is required because of the JOIN with eventCategories.
+     * PHASE 2: Excludes soft-deleted events (deletedAt IS NULL).
      */
     @Query("""
             SELECT DISTINCT e FROM Event e
             LEFT JOIN e.eventCategories ec
             WHERE e.status = :status
+              AND e.deletedAt IS NULL
               AND (:categoryId IS NULL OR ec.category.id = :categoryId)
               AND (:dateFrom IS NULL OR e.startTime >= :dateFrom)
               AND (:dateTo IS NULL OR e.endTime <= :dateTo)
@@ -102,4 +104,50 @@ public interface EventRepository extends JpaRepository<Event, UUID> {
     /* -------------------- Lifecycle / Scheduled Queries -------------------- */
 
     List<Event> findByStatusAndEndTimeBefore(EventStatus status, Instant endTime);
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /* -------------------- Slug -------------------- */
+
+    Optional<Event> findBySlug(String slug);
+
+    boolean existsBySlug(String slug);
+
+    /* -------------------- View Count -------------------- */
+
+    @Modifying
+    @Query("UPDATE Event e SET e.viewCount = e.viewCount + 1 WHERE e.id = :eventId")
+    int incrementViewCount(@Param("eventId") UUID eventId);
+
+    Page<Event> findByStatusOrderByViewCountDesc(EventStatus status, Pageable pageable);
+
+    /* -------------------- Soft Delete -------------------- */
+
+    @Query("SELECT e FROM Event e WHERE e.id = :eventId")
+    Optional<Event> findByIdIncludingDeleted(@Param("eventId") UUID eventId);
+
+    List<Event> findByHostIdAndDeletedAtIsNotNull(UUID hostId);
+
+    Page<Event> findByHostIdAndDeletedAtIsNull(UUID hostId, Pageable pageable);
+
+    /* -------------------- Dashboard Stats -------------------- */
+
+    long countByStatus(EventStatus status);
+
+    long countByStatusAndCreatedAtAfter(EventStatus status, Instant createdAt);
+
+    /* -------------------- Search Suggestions -------------------- */
+
+    @Query("SELECT e FROM Event e WHERE e.status = 'PUBLISHED' " +
+           "AND LOWER(e.title) LIKE LOWER(CONCAT('%', :query, '%')) " +
+           "AND e.deletedAt IS NULL")
+    List<Event> findTop5ByTitleContainingIgnoreCaseAndStatusPublished(
+            @Param("query") String query, Pageable pageable);
+
+    @Query("SELECT DISTINCT e.location FROM Event e " +
+           "WHERE e.status = 'PUBLISHED' " +
+           "AND LOWER(e.location) LIKE LOWER(CONCAT('%', :query, '%')) " +
+           "AND e.deletedAt IS NULL")
+    List<String> findTop5DistinctLocationsByLocationContainingIgnoreCase(
+            @Param("query") String query, Pageable pageable);
 }

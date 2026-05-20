@@ -89,4 +89,27 @@ public class Event {
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
     private Instant createdAt;
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    /** Human-readable URL slug (auto-generated from title) */
+    @Column(name = "slug", unique = true, length = 150)
+    private String slug;
+
+    /** Social proof counter — incremented on every GET /api/events/{id} */
+    @Column(name = "view_count", nullable = false)
+    @Builder.Default
+    private Long viewCount = 0L;
+
+    /** Soft delete timestamp — null = active, non-null = deleted */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    /** QR check-in code for host display (6-char alphanumeric) */
+    @Column(name = "check_in_code", length = 10)
+    private String checkInCode;
+
+    /** Reason provided when host cancels the event */
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
+    private String cancellationReason;
 }

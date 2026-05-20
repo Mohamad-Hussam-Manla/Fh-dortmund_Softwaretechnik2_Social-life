@@ -1,5 +1,7 @@
 package de.fhdortmund.mystudyapp.identity.repository;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,4 +40,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             @Param("query") String query,
             @Param("trustLevel") TrustLevel trustLevel,
             Pageable pageable);
+
+    /* ==================== PHASE 2 ADDITIONS ==================== */
+
+    long countByCreatedAtAfter(Instant createdAt);
+
+    @Query("SELECT u FROM User u WHERE LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%'))")
+    List<User> findTop5ByDisplayNameContainingIgnoreCase(@Param("query") String query, Pageable pageable);
 }

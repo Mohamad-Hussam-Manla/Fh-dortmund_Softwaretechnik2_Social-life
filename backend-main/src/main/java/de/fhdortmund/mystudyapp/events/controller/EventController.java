@@ -1,6 +1,5 @@
 package de.fhdortmund.mystudyapp.events.controller;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,6 +25,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import de.fhdortmund.mystudyapp.common.response.ApiResponse;
 import de.fhdortmund.mystudyapp.common.response.PageResponse;
+import de.fhdortmund.mystudyapp.events.dto.CancelEventRequest;
+import de.fhdortmund.mystudyapp.events.dto.CheckInCodeDto;
 import de.fhdortmund.mystudyapp.events.dto.CreateEventRequest;
 import de.fhdortmund.mystudyapp.events.dto.EventDto;
 import de.fhdortmund.mystudyapp.events.service.EventService;
@@ -51,6 +52,31 @@ public class EventController {
                 .body(ApiResponse.success(event, "Event created successfully"));
     }
 
+    /**
+     * PHASE 2: Create a draft event — no date validation, partial data accepted.
+     */
+    @PostMapping("/draft")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<EventDto>> createDraft(
+            @Valid @RequestBody CreateEventRequest request,
+            @AuthenticationPrincipal User principal) {
+        EventDto event = eventService.createDraft(request, principal.getUsername());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(event, "Draft created successfully"));
+    }
+
+    /**
+     * PHASE 2: Publish a draft event.
+     */
+    @PutMapping("/{eventId}/publish")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<EventDto>> publishDraft(
+            @PathVariable UUID eventId,
+            @AuthenticationPrincipal User principal) {
+        EventDto event = eventService.publishDraft(eventId, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(event, "Draft published successfully"));
+    }
+
     @GetMapping("/{eventId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<EventDto>> getEvent(
@@ -60,19 +86,34 @@ public class EventController {
         return ResponseEntity.ok(ApiResponse.success(event, "Event retrieved"));
     }
 
+    /**
+     * PHASE 2: Get event by slug.
+     */
+    @GetMapping("/by-slug/{slug}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<EventDto>> getEventBySlug(
+            @PathVariable String slug,
+            @AuthenticationPrincipal User principal) {
+        EventDto event = eventService.getEventBySlug(slug, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(event, "Event retrieved"));
+    }
+
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<EventDto>>> getPublishedEvents(
             @RequestParam(required = false) Integer categoryId,
-            @RequestParam(required = false) Instant dateFrom,
-            @RequestParam(required = false) Instant dateTo,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
             @RequestParam(required = false) String location,
             @RequestParam(required = false) String q,
             @PageableDefault(size = 20, sort = "startTime") Pageable pageable,
             @AuthenticationPrincipal User principal) {
 
+        java.time.Instant from = dateFrom != null ? java.time.Instant.parse(dateFrom) : null;
+        java.time.Instant to = dateTo != null ? java.time.Instant.parse(dateTo) : null;
+
         PageResponse<EventDto> events = eventService.getPublishedEvents(
-                categoryId, dateFrom, dateTo, location, q, pageable, principal.getUsername());
+                categoryId, from, to, location, q, pageable, principal.getUsername());
 
         return ResponseEntity.ok(ApiResponse.success(events, "Events retrieved"));
     }
@@ -80,9 +121,14 @@ public class EventController {
     @GetMapping("/my-events")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<EventDto>>> getMyEvents(
+            @RequestParam(required = false, defaultValue = "false") boolean includeDeleted,
             @PageableDefault(size = 20, sort = "startTime") Pageable pageable,
             @AuthenticationPrincipal User principal) {
-        PageResponse<EventDto> events = eventService.getMyEvents(principal.getUsername(), pageable);
+
+        PageResponse<EventDto> events = includeDeleted
+                ? eventService.getMyEventsIncludingDeleted(principal.getUsername(), pageable)
+                : eventService.getMyEvents(principal.getUsername(), pageable);
+
         return ResponseEntity.ok(ApiResponse.success(events, "My events retrieved"));
     }
 
@@ -100,18 +146,47 @@ public class EventController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<EventDto>> cancelEvent(
             @PathVariable UUID eventId,
+            @Valid @RequestBody(required = false) CancelEventRequest request,
             @AuthenticationPrincipal User principal) {
-        EventDto event = eventService.cancelEvent(eventId, principal.getUsername());
+        String reason = request != null ? request.getReason() : null;
+        EventDto event = eventService.cancelEvent(eventId, principal.getUsername(), reason);
         return ResponseEntity.ok(ApiResponse.success(event, "Event cancelled successfully"));
     }
 
+    /**
+     * PHASE 2: Soft delete (move to trash bin).
+     */
     @DeleteMapping("/{eventId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> deleteEvent(
             @PathVariable UUID eventId,
             @AuthenticationPrincipal User principal) {
         eventService.deleteEvent(eventId, principal.getUsername());
-        return ResponseEntity.ok(ApiResponse.success(null, "Event deleted successfully"));
+        return ResponseEntity.ok(ApiResponse.success(null, "Event moved to trash"));
+    }
+
+    /**
+     * PHASE 2: Restore soft-deleted event.
+     */
+    @PatchMapping("/{eventId}/restore")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<EventDto>> restoreEvent(
+            @PathVariable UUID eventId,
+            @AuthenticationPrincipal User principal) {
+        EventDto event = eventService.restoreEvent(eventId, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(event, "Event restored successfully"));
+    }
+
+    /**
+     * PHASE 2: Permanent delete (admin or already soft-deleted).
+     */
+    @DeleteMapping("/{eventId}/permanent")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> permanentlyDeleteEvent(
+            @PathVariable UUID eventId,
+            @AuthenticationPrincipal User principal) {
+        eventService.permanentlyDeleteEvent(eventId, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(null, "Event permanently deleted"));
     }
 
     /* -------------------- Media -------------------- */
@@ -135,5 +210,44 @@ public class EventController {
             @AuthenticationPrincipal User principal) {
         EventDto event = eventService.removeMedia(eventId, mediaId, principal.getUsername());
         return ResponseEntity.ok(ApiResponse.success(event, "Media removed successfully"));
+    }
+
+    /**
+     * PHASE 2: Reorder media for an event.
+     */
+    @PatchMapping("/{eventId}/media/reorder")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<EventDto>> reorderMedia(
+            @PathVariable UUID eventId,
+            @RequestBody List<UUID> mediaIds,
+            @AuthenticationPrincipal User principal) {
+        EventDto event = eventService.reorderMedia(eventId, mediaIds, principal.getUsername());
+        return ResponseEntity.ok(ApiResponse.success(event, "Media reordered successfully"));
+    }
+
+    /* -------------------- Check-In (Phase 2 / 4.1) -------------------- */
+
+    /**
+     * Generate or retrieve a check-in code for the event.
+     * Host only — displays this as a QR code for attendees to scan.
+     * Code regenerates every 5 minutes for security.
+     */
+    @GetMapping("/{eventId}/check-in-code")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<CheckInCodeDto>> getCheckInCode(
+            @PathVariable UUID eventId,
+            @AuthenticationPrincipal User principal) {
+        
+        String code = eventService.generateCheckInCode(eventId, principal.getUsername());
+        EventDto event = eventService.getEvent(eventId, principal.getUsername());
+        
+        CheckInCodeDto dto = CheckInCodeDto.builder()
+                .checkInCode(code)
+                .eventId(eventId.toString())
+                .eventTitle(event.getTitle())
+                .generatedAt(java.time.Instant.now().toString())
+                .build();
+                
+        return ResponseEntity.ok(ApiResponse.success(dto, "Check-in code generated"));
     }
 }
