@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-orange: #EA580C;
+  --color-brand-dark: #2A1405;
+}
+
+/* تصفير شامل لضمان عمل كلاسات التايلوند البيضاء والدائرية بنسبة 100% */
+@layer base {
+  *, ::before, ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: #FFF9F5;
+  }
+
+  /* إجبار حقول الإدخال على إزالة الخلفيات والحدود الافتراضية للمتصفح */
+  input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #2A1405;
+  }
+
+  button {
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+}
