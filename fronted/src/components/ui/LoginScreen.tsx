@@ -2,9 +2,10 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Lock, Mail, Eye, EyeOff, AlertCircle } from "lucide-react";
 import UniversitySocialLifeLogo from "./UniversitySocialLifeLogo";
+import type { UserProfile } from "../../types";
 
 interface ScreenProps {
-  onSuccess: () => void;
+  onSuccess: (token: string, user: UserProfile) => void;
   onSwitch: () => void;
 }
 
@@ -36,19 +37,23 @@ export const LoginScreen = ({ onSuccess, onSwitch }: ScreenProps) => {
         }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => ({}));
 
-      if (response.ok) {
-        if (data && data.token) {
-          localStorage.setItem("token", data.token); // حفظ التوكن بنجاح
+      if (response.ok && body.data) {
+        const { accessToken, user } = body.data;
+        if (accessToken && user) {
+          onSuccess(accessToken, {
+            id: user.id,
+            displayName: user.displayName,
+            universityEmail: user.universityEmail,
+            bio: user.bio,
+            profileImageUrl: user.profileImageUrl,
+            role: user.role,
+          });
+          return;
         }
-        onSuccess(); // تشغيل دالة النجاح والانتقال للرئيسية
-      } else {
-        // إذا كانت البيانات خاطئة ستظهر هنا كرسالة نصية عادية بدون النوافذ المنبثقة
-        setError(
-          data.message || "Anmeldung fehlgeschlagen. Bitte Daten prüfen.",
-        );
       }
+      setError(body.message || "Anmeldung fehlgeschlagen. Bitte Daten prüfen.");
     } catch (err) {
       setError("Serververbindung fehlgeschlagen");
     } finally {
