@@ -2,9 +2,10 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { User, Mail, Lock, Eye, EyeOff, ChevronLeft, Check } from "lucide-react";
 import UniversitySocialLifeLogo from "./UniversitySocialLifeLogo";
+import type { UserProfile } from "../../types";
 
 interface ScreenProps {
-  onSuccess: () => void;
+  onSuccess: (token: string, user: UserProfile) => void;
   onSwitch: () => void;
 }
 
@@ -27,7 +28,7 @@ export const RegisterScreen = ({ onSuccess, onSwitch }: ScreenProps) => {
     setError("");
     if (!email || !password || !name) return setError("Bitte füllen Sie alle Felder aus");
     if (!accountType) return setError("Nur gültige Universität-E-Mail-Adressen sind erlaubt");
-    if (password !== confirmPassword) return setError("Passwörter stimmen nicht übereinstimmen");
+    if (password !== confirmPassword) return setError("Passwörter stimmen nicht überein");
 
     setIsLoading(true);
     try {
@@ -45,12 +46,13 @@ export const RegisterScreen = ({ onSuccess, onSwitch }: ScreenProps) => {
         }),
       });
 
+      const body = await response.json().catch(() => ({}));
+
       if (response.ok) {
-        onSuccess(); // العودة لشاشة الـ Login تلقائياً عند النجاح
-      } else {
-        const data = await response.json().catch(() => ({}));
-        setError(data.message || "Registrierung fehlgeschlagen");
+        onSwitch();
+        return;
       }
+      setError(body.message || "Registrierung fehlgeschlagen");
     } catch (err) {
       setError("Serverfehler");
     } finally {
